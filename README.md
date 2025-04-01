@@ -1,5 +1,5 @@
 # pixelart-gen
-A pixelart generator using ML
+A pixelart generator using ML. Currently WIP.
 
 TODO:
 - [ ] Models wrapped in classes (lighning modules, take pytorch-lightning tutorial)
