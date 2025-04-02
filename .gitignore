@@ -176,13 +176,5 @@ cython_debug/
 # Mac
 .DS_Store
 
-# Wandb
-wandb/
+# Training logs
 logs/
-
-# Models
-best_model.pth
-
-# Test images
-test_image.png
-output_image.png

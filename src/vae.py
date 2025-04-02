@@ -5,7 +5,7 @@ import pytorch_lightning as pl
 from torch.optim import Adam
 
 
-class ConvVAE1(pl.LightningModule):
+class ConvVAE(pl.LightningModule):
     def __init__(
         self,
         input_channels: int = 3,
@@ -19,9 +19,12 @@ class ConvVAE1(pl.LightningModule):
 
         # Calculate the dimension after all convolutions
         # assuming input is 64x64 and each conv reduces size by half (stride=2)
-        # After 4 convs: 64 -> 32 -> 16 -> 8 -> 4
-        self.last_encoder_size = 4  # Size after last conv layer
+        # For n convolutional layers: 64 -> 32 -> 16 -> 8 -> 4 (etc)
+        self.last_encoder_size = 64 // (2 ** len(hidden_dims))  # Size after last conv layer
         self.last_encoder_channels = hidden_dims[-1]  # Channels after last conv
+        
+        print(f"Debug - Network structure: input_size=64, hidden_dims={hidden_dims}")
+        print(f"Debug - Last encoder size: {self.last_encoder_size}, channels: {self.last_encoder_channels}")
 
         # Encoder
         encoder_layers = []
@@ -141,28 +144,45 @@ class ConvVAE1(pl.LightningModule):
         The total loss is the sum of these two components, balancing reconstruction
         quality with the regularization of the latent space.
         """
-        BCE = F.binary_cross_entropy(recon_x, x, reduction="sum")
-        KLD = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
-        return BCE + KLD
+        # Get batch size for normalization
+        batch_size = x.size(0)
+        
+        # Use mean reduction to normalize by the number of elements
+        BCE = F.binary_cross_entropy(recon_x, x, reduction="mean")
+        
+        # Normalize KLD by batch size and number of elements per sample
+        KLD = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / batch_size
+        
+        # Optionally scale KLD to balance with BCE (beta-VAE)
+        beta = 1.0  # Adjust this value to control KLD weight
+        
+        # Combine the losses
+        return BCE + beta * KLD
 
     def training_step(self, batch, batch_idx):
         x = batch["tensor"]
-        # Add batch dimension if it's missing
-        if x.dim() == 3:  # [C, H, W]
-            x = x.unsqueeze(0)  # [1, C, H, W]
+        # Print shape for debugging
+        if batch_idx == 0:
+            print(f"Training input tensor shape: {x.shape}, dim: {x.dim()}")
+        
         recon_x, mu, log_var = self(x)
         loss = self.loss_function(recon_x, x, mu, log_var)
-        self.log("train_loss", loss)
+        # Only log on the last batch to reduce overhead
+        if batch_idx % 50 == 0:
+            self.log("train_loss", loss, prog_bar=True, on_epoch=True, on_step=False)
         return loss
 
     def validation_step(self, batch, batch_idx):
         x = batch["tensor"]
-        # Add batch dimension if it's missing
-        if x.dim() == 3:  # [C, H, W]
-            x = x.unsqueeze(0)  # [1, C, H, W]
+        # Print shape for debugging
+        if batch_idx == 0:
+            print(f"Validation input tensor shape: {x.shape}, dim: {x.dim()}")
+        
         recon_x, mu, log_var = self(x)
         loss = self.loss_function(recon_x, x, mu, log_var)
-        self.log("val_loss", loss)
+        # Only log once per validation to reduce overhead
+        if batch_idx == 0:
+            self.log("val_loss", loss, prog_bar=True)
         return loss
 
     def configure_optimizers(self):
