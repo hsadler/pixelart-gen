@@ -178,6 +178,7 @@ cython_debug/
 
 # Wandb
 wandb/
+logs/
 
 # Models
 best_model.pth

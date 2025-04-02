@@ -1,4 +1,6 @@
 
-hello:
-	poetry run python -m src.cli hello
+train:
+	poetry run python -m src.cli train
 
+format:
+	poetry run black . --line-length=100
