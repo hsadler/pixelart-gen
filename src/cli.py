@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks import Callback
 import wandb
@@ -21,16 +21,13 @@ logger = logging.getLogger(__name__)
 
 
 IMAGE_PIXEL_SIZE = 64
-
-LATENT_DIM = 64  # Reduced from 128 to 64
+LATENT_DIM = 1024  # options: 64, 128, 256, 512, 1024
 
 TRAIN_EPOCHS = 100
 TRAIN_BATCH_SIZE = 128
 VAL_BATCH_SIZE = 128
 LEARNING_RATE = 5e-4
-# KL_WEIGHT = 0.0
 KL_WEIGHT = 0.01
-# KL_WEIGHT = 0.1
 
 MODEL_CHECKPOINT = Path("checkpoints/vae-overfit-v8.ckpt")
 GENERATE_SAMPLES_DIR = Path("generated_samples")
@@ -41,7 +38,7 @@ class ImageLoggerCallback(Callback):
         super().__init__()
         self.val_samples = val_samples
         self.every_n_epochs = every_n_epochs
-        
+
     def on_validation_epoch_end(self, trainer, pl_module):
         # Only log every n epochs
         if (trainer.current_epoch + 1) % self.every_n_epochs == 0:
@@ -64,7 +61,6 @@ class ImageLoggerCallback(Callback):
                     )
                 }
             )
-            
 
 
 def train():
@@ -97,15 +93,15 @@ def train():
         kl_weight=KL_WEIGHT,
     )
     # Setup model checkpointing
-    # checkpoint_callback_best = ModelCheckpoint(
-    #     dirpath="checkpoints",
-    #     filename="vae-best",
-    #     monitor="val_loss",
-    #     mode="min",
-    #     save_top_k=1,  # Save the best model
-    #     verbose=True,
-    #     save_last=True,  # Also save the last model
-    # )
+    checkpoint_callback_best = ModelCheckpoint(
+        dirpath="checkpoints",
+        filename="vae-best",
+        monitor="val_loss",
+        mode="min",
+        save_top_k=1,  # Save the best model
+        verbose=True,
+        save_last=True,  # Also save the last model
+    )
     # Add learning rate monitor
     lr_monitor: LearningRateMonitor = LearningRateMonitor(logging_interval="epoch")
     # Add early stopping
@@ -134,7 +130,7 @@ def train():
         check_val_every_n_epoch=1,  # Only validate once per epoch
         limit_val_batches=0.3,  # Use only 30% of validation data
         callbacks=[
-            # checkpoint_callback_best,
+            checkpoint_callback_best,
             lr_monitor,
             early_stop_callback,
             image_logger,
