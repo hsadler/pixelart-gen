@@ -176,5 +176,7 @@ cython_debug/
 # Mac
 .DS_Store
 
-# Training logs
+# Model stuff
 logs/
+checkpoints/
+generated_samples/

@@ -14,6 +14,21 @@ def tensor_to_pil_image(image_tensor: torch.Tensor) -> Image.Image:
     return ToPILImage(mode="RGB")(image_tensor)
 
 
+def tensor_batch_to_pil_images(image_tensors: torch.Tensor) -> list[Image.Image]:
+    if image_tensors.dim() != 4:
+        raise ValueError(
+            f"Expected 4D tensor with shape [batch_size, 3, height, width], "
+            f"but got tensor with shape {image_tensors.shape}"
+        )
+    images = []
+    for image_tensor in image_tensors:
+        # Remove batch dimension if present and convert to PIL image
+        if image_tensor.dim() > 3:
+            image_tensor = image_tensor.squeeze(0)
+        images.append(tensor_to_pil_image(image_tensor))
+    return images
+
+
 def pil_image_concat(images: list[Image.Image]) -> Image.Image:
     new_image = Image.new("RGB", (images[0].width * len(images), images[0].height))
     for i, img in enumerate(images):
