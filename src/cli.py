@@ -9,6 +9,8 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.callbacks import Callback
+import wandb
 
 from src.vae import ConvAutoencoder_Simple, ConvVAE_Simple
 from src.dataset import load_and_preprocess_dataset, cleanup_dataloader
@@ -22,7 +24,7 @@ IMAGE_PIXEL_SIZE = 64
 
 LATENT_DIM = 64  # Reduced from 128 to 64
 
-TRAIN_EPOCHS = 20
+TRAIN_EPOCHS = 100
 TRAIN_BATCH_SIZE = 128
 VAL_BATCH_SIZE = 128
 LEARNING_RATE = 5e-4
@@ -34,14 +36,43 @@ MODEL_CHECKPOINT = Path("checkpoints/vae-overfit-v8.ckpt")
 GENERATE_SAMPLES_DIR = Path("generated_samples")
 
 
+class ImageLoggerCallback(Callback):
+    def __init__(self, val_samples, every_n_epochs=20):
+        super().__init__()
+        self.val_samples = val_samples
+        self.every_n_epochs = every_n_epochs
+        
+    def on_validation_epoch_end(self, trainer, pl_module):
+        # Only log every n epochs
+        if (trainer.current_epoch + 1) % self.every_n_epochs == 0:
+            # Get a batch from validation
+            val_imgs = self.val_samples.to(device=pl_module.device)
+            with torch.no_grad():
+                recon_imgs, _, _ = pl_module(val_imgs)
+            # Log sample input and reconstruction images side by side in a single grid
+            imgs: list[Image.Image] = []
+            for idx in range(len(val_imgs)):
+                # Convert tensors to PIL images and append
+                imgs.append(tensor_batch_to_pil_images(val_imgs)[idx])
+                imgs.append(tensor_batch_to_pil_images(recon_imgs)[idx])
+            pl_module.logger.experiment.log(
+                {
+                    "comparisons": wandb.Image(
+                        pil_image_concat(imgs),
+                        mode="RGB",
+                        caption="Left: Original, Right: Reconstruction",
+                    )
+                }
+            )
+            
+
+
 def train():
     # Instantiate the logger
     wandb_logger: WandbLogger = WandbLogger(
-        # project="pixelart-autoencoder",
-        project="pixelart-autoencoder-testing",
+        project="pixelart-vae",
         log_model=False,
         save_dir="./logs",  # Where to store logs locally
-        tags=["train-test"],  # Add custom tags for organizing runs
     )
     # Load your dataset
     train_dl: DataLoader = load_and_preprocess_dataset(
@@ -85,6 +116,14 @@ def train():
         verbose=True,
         mode="min",
     )
+    # Initialize validation samples for image logging
+    # Get a small batch for visualization
+    val_samples_for_logging = None
+    for batch in val_dl:
+        val_samples_for_logging = batch["tensor"][:10]
+        break
+    # Setup image logger callback
+    image_logger = ImageLoggerCallback(val_samples_for_logging, every_n_epochs=20)
     # Instantiate the trainer with callbacks
     trainer: Trainer = Trainer(
         max_epochs=TRAIN_EPOCHS,
@@ -98,6 +137,7 @@ def train():
             # checkpoint_callback_best,
             lr_monitor,
             early_stop_callback,
+            image_logger,
         ],
         gradient_clip_val=1.0,  # Add gradient clipping to prevent exploding gradients
     )
