@@ -34,3 +34,23 @@ def pil_image_concat(images: list[Image.Image]) -> Image.Image:
     for i, img in enumerate(images):
         new_image.paste(img, (i * img.width, 0))
     return new_image
+
+
+def interpolate_latents(
+    vae_encoder: torch.nn.Module,
+    vae_decoder: torch.nn.Module,
+    img1: torch.Tensor,
+    img2: torch.Tensor,
+    steps=10,
+) -> torch.Tensor:
+    mu1, _ = vae_encoder(img1.unsqueeze(0))
+    mu2, _ = vae_encoder(img2.unsqueeze(0))
+    # Use the mean vectors for interpolation
+    z1 = mu1
+    z2 = mu2
+    interpolated = []
+    for alpha in torch.linspace(0, 1, steps):
+        z = (1 - alpha) * z1 + alpha * z2
+        img: torch.Tensor = vae_decoder(z)
+        interpolated.append(img.squeeze())
+    return torch.stack(interpolated)

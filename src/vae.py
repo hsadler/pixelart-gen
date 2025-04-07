@@ -227,13 +227,13 @@ class ConvVAE_Simple(pl.LightningModule):
         log_var = self.fc_var(x)
         return mu, log_var
 
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        return self.decoder(z)
+
     def reparameterize(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
         std = torch.exp(0.5 * log_var)
         eps = torch.randn_like(std)
         return mu + eps * std
-
-    def decode(self, z: torch.Tensor) -> torch.Tensor:
-        return self.decoder(z)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         mu, log_var = self.encode(x)

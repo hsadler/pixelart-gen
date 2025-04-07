@@ -14,7 +14,7 @@ import wandb
 
 from src.vae import ConvAutoencoder_Simple, ConvVAE_Simple
 from src.dataset import load_and_preprocess_dataset, cleanup_dataloader
-from src.utils import tensor_batch_to_pil_images, pil_image_concat
+from src.utils import tensor_batch_to_pil_images, pil_image_concat, interpolate_latents
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,14 +27,16 @@ TRAIN_EPOCHS = 100
 TRAIN_BATCH_SIZE = 128
 VAL_BATCH_SIZE = 128
 LEARNING_RATE = 5e-4
-KL_WEIGHT = 0.01
+KL_WEIGHT = 0.1
 
-MODEL_CHECKPOINT = Path("checkpoints/vae-overfit-v8.ckpt")
+DEVICE = "mps"
+
+MODEL_CHECKPOINT = Path("checkpoints/vae-best.ckpt")
 GENERATE_SAMPLES_DIR = Path("generated_samples")
 
 
 class ImageLoggerCallback(Callback):
-    def __init__(self, val_samples, every_n_epochs=20):
+    def __init__(self, val_samples: torch.Tensor, every_n_epochs=10):
         super().__init__()
         self.val_samples = val_samples
         self.every_n_epochs = every_n_epochs
@@ -59,6 +61,21 @@ class ImageLoggerCallback(Callback):
                         mode="RGB",
                         caption="Left: Original, Right: Reconstruction",
                     )
+                }
+            )
+            interpolated = interpolate_latents(
+                pl_module.encode,
+                pl_module.decode,
+                self.val_samples[0].to(pl_module.device),
+                self.val_samples[1].to(pl_module.device),
+                steps=20,
+            )
+            # Log sample input and reconstruction images side by side in a single grid
+            pl_module.logger.experiment.log(
+                {
+                    "interpolations": wandb.Image(
+                        pil_image_concat(tensor_batch_to_pil_images(interpolated)),
+                    ),
                 }
             )
 
@@ -119,12 +136,12 @@ def train():
         val_samples_for_logging = batch["tensor"][:10]
         break
     # Setup image logger callback
-    image_logger = ImageLoggerCallback(val_samples_for_logging, every_n_epochs=20)
+    image_logger = ImageLoggerCallback(val_samples_for_logging, every_n_epochs=10)
     # Instantiate the trainer with callbacks
     trainer: Trainer = Trainer(
         max_epochs=TRAIN_EPOCHS,
         accelerator="auto",
-        devices="auto",
+        devices=DEVICE,
         logger=wandb_logger,
         log_every_n_steps=100,
         check_val_every_n_epoch=1,  # Only validate once per epoch
