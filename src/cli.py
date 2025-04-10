@@ -11,28 +11,32 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks import Callback
 import wandb
+from datasets import Dataset, load_dataset
 
 from src.vae import ConvAutoencoder_Simple, ConvVAE_Simple
-from src.dataset import load_and_preprocess_dataset, cleanup_dataloader
+from src.dataset import to_dataloaders_for_training, cleanup_dataloader
 from src.utils import tensor_batch_to_pil_images, pil_image_concat, interpolate_latents
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-IMAGE_PIXEL_SIZE = 64
-LATENT_DIM = 1024  # options: 64, 128, 256, 512, 1024
-
-TRAIN_EPOCHS = 100
-TRAIN_BATCH_SIZE = 128
-VAL_BATCH_SIZE = 128
-LEARNING_RATE = 5e-4
-KL_WEIGHT = 0.1
-
-DEVICE = "mps"
-
-MODEL_CHECKPOINT = Path("checkpoints/vae-best.ckpt")
-GENERATE_SAMPLES_DIR = Path("generated_samples")
+# wandb config
+WANDB_PROJECT: str = "pixelart-autoencoder-testing"
+LOG_IMAGES_EVERY_N_STEPS: int = 100
+# training data config
+TRAIN_BATCH_SIZE: int = 128
+VAL_BATCH_SIZE: int = 128
+# model config
+IMAGE_PIXEL_SIZE: int = 64
+TRAIN_EPOCHS: int = 100
+LATENT_DIM: int = 1024  # options: 64, 128, 256, 512, 1024
+KL_WEIGHT: float = 0.0
+LEARNING_RATE: float = 5e-4
+# device config
+DEVICE: str = "mps"
+# checkpoint config
+MODEL_CHECKPOINT: Path = Path("checkpoints/vae-best.ckpt")
+GENERATE_SAMPLES_DIR: Path = Path("generated_samples")
 
 
 class ImageLoggerCallback(Callback):
@@ -83,24 +87,18 @@ class ImageLoggerCallback(Callback):
 def train():
     # Instantiate the logger
     wandb_logger: WandbLogger = WandbLogger(
-        project="pixelart-vae",
+        project=WANDB_PROJECT,
         log_model=False,
-        save_dir="./logs",  # Where to store logs locally
+        save_dir="./logs",
     )
-    # Load your dataset
-    train_dl: DataLoader = load_and_preprocess_dataset(
-        path="tkarr/sprite_caption_dataset",
-        split="train",
+    # Load dataset splits
+    train_dataset: Dataset = load_dataset("tkarr/sprite_caption_dataset", split="train")
+    val_dataset: Dataset = load_dataset("tkarr/sprite_caption_dataset", split="valid")
+    train_dl, val_dl = to_dataloaders_for_training(
+        train_dataset,
+        val_dataset,
         image_pixel_size=IMAGE_PIXEL_SIZE,
         batch_size=TRAIN_BATCH_SIZE,
-        shuffle=True,
-    )
-    val_dl: DataLoader = load_and_preprocess_dataset(
-        path="tkarr/sprite_caption_dataset",
-        split="valid",
-        image_pixel_size=IMAGE_PIXEL_SIZE,
-        batch_size=VAL_BATCH_SIZE,
-        shuffle=False,
     )
     # Instantiate the model
     model: ConvVAE_Simple = ConvVAE_Simple(
@@ -136,16 +134,19 @@ def train():
         val_samples_for_logging = batch["tensor"][:10]
         break
     # Setup image logger callback
-    image_logger = ImageLoggerCallback(val_samples_for_logging, every_n_epochs=10)
+    image_logger = ImageLoggerCallback(
+        val_samples_for_logging,
+        every_n_epochs=LOG_IMAGES_EVERY_N_STEPS,
+    )
     # Instantiate the trainer with callbacks
     trainer: Trainer = Trainer(
         max_epochs=TRAIN_EPOCHS,
-        accelerator="auto",
-        devices=DEVICE,
+        accelerator=DEVICE,
+        devices="auto",
         logger=wandb_logger,
         log_every_n_steps=100,
         check_val_every_n_epoch=1,  # Only validate once per epoch
-        limit_val_batches=0.3,  # Use only 30% of validation data
+        limit_val_batches=1.0,  # Use at least 1 batch for validation
         callbacks=[
             checkpoint_callback_best,
             lr_monitor,
@@ -186,18 +187,22 @@ def train_overfit(num_samples: int = 10, epochs: int = 100):
         save_dir="./logs",
         tags=["vae-overfit-test"],
     )
-    # Load dataset but take only a small subset
-    full_train_dl = load_and_preprocess_dataset(
-        path="tkarr/sprite_caption_dataset",
-        split="train",
+    
+    # Load dataset splits
+    train_dataset: Dataset = load_dataset("tkarr/sprite_caption_dataset", split="train")
+    val_dataset: Dataset = load_dataset("tkarr/sprite_caption_dataset", split="valid")
+    full_train_dl, full_val_dl = to_dataloaders_for_training(
+        train_dataset,
+        val_dataset,
         image_pixel_size=IMAGE_PIXEL_SIZE,
-        batch_size=num_samples,  # Set batch size to number of samples
-        shuffle=False,  # Don't shuffle so we get the same samples each time
+        batch_size=num_samples,
     )
     # Get the first batch and create a fixed dataset from it
     for batch in full_train_dl:
         train_samples = batch
         break
+    cleanup_dataloader(full_train_dl)
+    cleanup_dataloader(full_val_dl)
 
     # Use this batch for both training and validation
     class FixedDataset(torch.utils.data.Dataset):
@@ -209,11 +214,11 @@ def train_overfit(num_samples: int = 10, epochs: int = 100):
 
         def __getitem__(self, idx):
             return {"tensor": self.samples["tensor"][idx]}
-
     fixed_dataset = FixedDataset(train_samples)
     train_dl = DataLoader(fixed_dataset, batch_size=num_samples, shuffle=True)
     val_dl = DataLoader(fixed_dataset, batch_size=num_samples, shuffle=False)
-    # Instantiate the model with higher capacity
+    
+    # Instantiate model
     model = ConvVAE_Simple(
         image_pixel_size=IMAGE_PIXEL_SIZE,
         learning_rate=LEARNING_RATE,
@@ -246,8 +251,8 @@ def train_overfit(num_samples: int = 10, epochs: int = 100):
             comparison = pil_image_concat([input_img, recon_img])
             GENERATE_SAMPLES_DIR.mkdir(exist_ok=True)
             comparison.save(GENERATE_SAMPLES_DIR / f"overfit_sample_{i}.png")
-    # Clean up
-    cleanup_dataloader(full_train_dl)
+    
+    # Clean up dataloaders
     cleanup_dataloader(train_dl)
     cleanup_dataloader(val_dl)
 
@@ -255,13 +260,15 @@ def train_overfit(num_samples: int = 10, epochs: int = 100):
 def predict_from_dataset_index(
     split: str, index: int, device: str = "cpu", deterministic: bool = True
 ) -> None:
-    dl: DataLoader = load_and_preprocess_dataset(
-        path="tkarr/sprite_caption_dataset",
-        split=split,
+    train_dataset: Dataset = load_dataset("tkarr/sprite_caption_dataset", split="train")
+    val_dataset: Dataset = load_dataset("tkarr/sprite_caption_dataset", split="valid")
+    train_dl, val_dl = to_dataloaders_for_training(
+        train_dataset,
+        val_dataset,
         image_pixel_size=IMAGE_PIXEL_SIZE,
         batch_size=1,
-        shuffle=False,
     )
+    dl = train_dl if split == "train" else val_dl
     # Get the first batch from the data loader
     for batch in dl:
         input_tensor_batch: torch.Tensor = batch["tensor"]
