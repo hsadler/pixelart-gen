@@ -14,18 +14,18 @@ def to_dataloaders_for_training(
     image_pixel_size: int,
     batch_size: int = 32,
 ) -> tuple[DataLoader, DataLoader]:
-    # Build checksum set from training set by checksumming all images
-    train_checksums = set()
-    for item in train_ds:
+    # Build checksum set from validation set by checksumming all images
+    val_checksums = set()
+    for item in val_ds:
         image = item["image"]
         checksum = hashlib.md5(image.tobytes()).hexdigest()
-        train_checksums.add(checksum)
-    # Filter validation set images to only include those that are not in the training set
+        val_checksums.add(checksum)
+    # Filter training set images to only include those that are not in the validation set
     def filter(x):
         image = x["image"]
         checksum = hashlib.md5(image.tobytes()).hexdigest()
-        return checksum not in train_checksums
-    val_ds = val_ds.filter(filter)
+        return checksum not in val_checksums
+    train_ds = train_ds.filter(filter)
     # Define a function to convert a dataset to a dataloader
     def to_dataloader(ds: Dataset, shuffle: bool = False) -> DataLoader:
         # Preprocess images
