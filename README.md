@@ -12,3 +12,13 @@ TODO:
 - use mnist dataset
 - log std deviation instead of log variance
 - push kl weight higher until both interpolations look good and reconstruction looks good (balance both)
+- try interpolation on higher layers
+
+interpolation ideas:
+- encode 2 images
+- show activations of all layers by running for loop and creating a large image composing all layers
+- try to visualize the intermediate activations
+- post images to wandb of intermediate activations
+- visualize the features
+
+Q: how do i visualize the features convolutional layers?
